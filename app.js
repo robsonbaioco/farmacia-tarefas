@@ -138,7 +138,8 @@ function sanitizeState(s) {
     tasks,
     templates: Array.isArray(s.templates) ? s.templates.map(normalizeTemplate) : base.templates,
     settings: { theme: ['auto', 'light', 'dark'].includes(s.settings?.theme) ? s.settings.theme : 'auto' },
-    onboarded: typeof s.onboarded === 'boolean' ? s.onboarded : !!(profile.name || tasks.length),
+    // Dados da versão antiga (sem o campo) só contam como perfil criado se houver nome
+    onboarded: typeof s.onboarded === 'boolean' ? s.onboarded : !!profile.name,
     createdAt: s.createdAt || base.createdAt,
   };
 }
@@ -772,7 +773,7 @@ function finishOnboarding(f) {
   const picked = new Set($$('input[name="tpl"]:checked', f).map((c) => c.value));
   state.templates.forEach((t) => { t.routine = picked.has(t.id); });
   const today = todayISO();
-  state.tasks = state.templates.filter((t) => t.routine).map((t) => taskFromTemplate(t, today));
+  state.tasks.push(...state.templates.filter((t) => t.routine).map((t) => taskFromTemplate(t, today)));
   state.onboarded = true;
   ui.view = 'day'; ui.date = today;
   save(); render(); window.scrollTo(0, 0);
