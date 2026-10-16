@@ -20,13 +20,13 @@ const CATEGORIES = [
 ];
 
 const DEFAULT_TEMPLATES = [
-  { title: 'Registrar temperatura e umidade (abertura)', category: 'estoque', time: '08:00', priority: 'alta', routine: true, notes: 'Geladeira de termolábeis (2 °C a 8 °C) e ambiente.' },
-  { title: 'Abrir caixa e conferir troco', category: 'caixa', time: '08:00', priority: 'normal', routine: true },
-  { title: 'Conferir receitas retidas e escriturar no SNGPC', category: 'controlados', time: '10:00', priority: 'alta', routine: true },
-  { title: 'Repor gôndolas e expositores', category: 'estoque', time: '11:00', priority: 'normal', routine: true },
-  { title: 'Limpeza e organização do balcão', category: 'limpeza', time: '13:00', priority: 'normal', routine: true },
-  { title: 'Registrar temperatura e umidade (fechamento)', category: 'estoque', time: '17:00', priority: 'alta', routine: true },
-  { title: 'Fechamento e conferência do caixa', category: 'caixa', time: '18:00', priority: 'normal', routine: true },
+  { title: 'Registrar temperatura e umidade (abertura)', category: 'estoque', time: '08:00', priority: 'alta', notes: 'Geladeira de termolábeis (2 °C a 8 °C) e ambiente.' },
+  { title: 'Abrir caixa e conferir troco', category: 'caixa', time: '08:00', priority: 'normal' },
+  { title: 'Conferir receitas retidas e escriturar no SNGPC', category: 'controlados', time: '10:00', priority: 'alta' },
+  { title: 'Repor gôndolas e expositores', category: 'estoque', time: '11:00', priority: 'normal' },
+  { title: 'Limpeza e organização do balcão', category: 'limpeza', time: '13:00', priority: 'normal' },
+  { title: 'Registrar temperatura e umidade (fechamento)', category: 'estoque', time: '17:00', priority: 'alta' },
+  { title: 'Fechamento e conferência do caixa', category: 'caixa', time: '18:00', priority: 'normal' },
   { title: 'Verificar produtos próximos ao vencimento', category: 'estoque', priority: 'normal', notes: 'Separar itens que vencem nos próximos 90 dias.' },
   { title: 'Receber e conferir mercadoria (nota x pedido)', category: 'estoque', priority: 'normal' },
   { title: 'Inventário de medicamentos controlados', category: 'controlados', priority: 'alta' },
@@ -50,6 +50,8 @@ const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
 const fromISO = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const todayISO = () => toISO(new Date());
 const addDays = (iso, n) => { const d = fromISO(iso); d.setDate(d.getDate() + n); return toISO(d); };
+const isValidTime = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(s || '');
+const shiftLabel = (p) => (p.shiftStart && p.shiftEnd ? `${p.shiftStart}–${p.shiftEnd}` : '');
 const isValidISO = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(fromISO(s).getTime());
 // Semana começa na segunda-feira
 const weekStart = (iso) => { const d = fromISO(iso); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return toISO(d); };
@@ -76,10 +78,12 @@ const ui = { view: 'day', date: todayISO(), editingTaskId: null, editingTplId: n
 
 function freshState() {
   return {
-    profile: { name: '', role: '', store: '', shift: '' },
+    profile: { name: '', role: '', store: '', shiftStart: '', shiftEnd: '' },
     tasks: [],
     templates: DEFAULT_TEMPLATES.map((t) => normalizeTemplate({ ...t, id: uid() })),
     settings: { theme: 'auto' },
+    // Sem perfil criado ainda: a tela inicial é o cadastro
+    onboarded: false,
     createdAt: new Date().toISOString(),
   };
 }
@@ -89,11 +93,7 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return sanitizeState(JSON.parse(raw));
   } catch (e) { console.warn('Falha ao ler dados salvos', e); }
-  const s = freshState();
-  // Primeira execução: já deixa a rotina do dia montada
-  const today = todayISO();
-  s.tasks = s.templates.filter((t) => t.routine).map((t) => taskFromTemplate(t, today));
-  return s;
+  return freshState();
 }
 
 function save() {
@@ -130,11 +130,15 @@ function normalizeTemplate(t) {
 
 function sanitizeState(s) {
   const base = freshState();
+  const profile = { ...base.profile, ...pickStrings(s.profile, ['name', 'role', 'store', 'shiftStart', 'shiftEnd']) };
+  for (const k of ['shiftStart', 'shiftEnd']) if (!isValidTime(profile[k])) profile[k] = '';
+  const tasks = Array.isArray(s.tasks) ? s.tasks.map(normalizeTask) : [];
   return {
-    profile: { ...base.profile, ...pickStrings(s.profile, ['name', 'role', 'store', 'shift']) },
-    tasks: Array.isArray(s.tasks) ? s.tasks.map(normalizeTask) : [],
+    profile,
+    tasks,
     templates: Array.isArray(s.templates) ? s.templates.map(normalizeTemplate) : base.templates,
     settings: { theme: ['auto', 'light', 'dark'].includes(s.settings?.theme) ? s.settings.theme : 'auto' },
+    onboarded: typeof s.onboarded === 'boolean' ? s.onboarded : !!(profile.name || tasks.length),
     createdAt: s.createdAt || base.createdAt,
   };
 }
@@ -188,6 +192,7 @@ function deleteTask(id) {
 function applyRoutine(date) {
   const existing = new Set(tasksOn(date).map((t) => t.title.toLowerCase()));
   const toAdd = state.templates.filter((t) => t.routine && !existing.has(t.title.toLowerCase()));
+  if (!state.templates.some((t) => t.routine)) { toast('Nenhum modelo marcado como rotina. Marque na aba Modelos.'); return; }
   if (!toAdd.length) { toast('A rotina diária já está neste dia.'); return; }
   const added = toAdd.map((t) => taskFromTemplate(t, date));
   state.tasks.push(...added);
@@ -217,9 +222,13 @@ function moveOverdueToToday() {
 const app = $('#app');
 
 function render() {
+  const onboarding = !state.onboarded;
+  $('.tabs').hidden = onboarding;
+  document.body.classList.toggle('onboarding', onboarding);
   $$('.tab').forEach((b) => { if (b.dataset.view === ui.view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-  $('#fab').hidden = ui.view === 'profile';
+  $('#fab').hidden = onboarding || ui.view === 'profile';
   renderGreeting();
+  if (onboarding) { renderOnboarding(); return; }
   ({ day: renderDay, week: renderWeek, templates: renderTemplates, profile: renderProfile })[ui.view]();
 }
 
@@ -228,8 +237,73 @@ function renderGreeting() {
   const hi = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const name = state.profile.name.trim().split(/\s+/)[0];
   const store = state.profile.store.trim();
-  $('#greeting').textContent = `${hi}${name ? ', ' + name : ''}${store ? ' · ' + store : ''}`;
+  const shift = shiftLabel(state.profile);
+  $('#greeting').textContent = `${hi}${name ? ', ' + name : ''}${store ? ' · ' + store : ''}${shift ? ' · ' + shift : ''}`;
 }
+
+function shiftFieldsHTML(p) {
+  return `
+  <fieldset class="shift">
+    <legend>Turno</legend>
+    <div class="row">
+      <label>Começa às<input type="time" name="shiftStart" value="${esc(p.shiftStart)}"></label>
+      <label>Termina às<input type="time" name="shiftEnd" value="${esc(p.shiftEnd)}"></label>
+    </div>
+  </fieldset>`;
+}
+
+/** Lê e valida o turno de um formulário; retorna null (e avisa) se só um dos horários foi preenchido. */
+function readShift(f) {
+  const shiftStart = f.shiftStart.value, shiftEnd = f.shiftEnd.value;
+  if (!!shiftStart !== !!shiftEnd) { toast('Informe o horário de início e de término do turno.'); return null; }
+  if (shiftStart && shiftStart === shiftEnd) { toast('O início e o término do turno não podem ser iguais.'); return null; }
+  return { shiftStart, shiftEnd };
+}
+
+function renderOnboarding() {
+  const groups = CATEGORIES.map((c) => ({ ...c, items: state.templates.filter((t) => t.category === c.id) })).filter((g) => g.items.length);
+  app.innerHTML = `
+  <form class="onboard stack" id="onboardForm">
+    <div>
+      <h1>Bem-vindo(a)!</h1>
+      <p class="muted">Crie seu perfil para começar. Os dados ficam só neste aparelho.</p>
+    </div>
+
+    <section class="card stack">
+      <h2>1. Seu perfil</h2>
+      <label>Nome *<input name="name" required maxlength="100" autocomplete="name"></label>
+      <div class="row">
+        <label>Função<input name="role" maxlength="100" list="roles" placeholder="Ex.: Balconista"></label>
+        <label>Farmácia / unidade<input name="store" maxlength="100"></label>
+      </div>
+      ${rolesDatalist()}
+      ${shiftFieldsHTML(state.profile)}
+    </section>
+
+    <section class="card stack">
+      <div>
+        <h2>2. Monte sua rotina diária <span class="muted" style="font-weight:400">(opcional)</span></h2>
+        <p class="muted" style="margin:4px 0 0">Marque as tarefas que você faz todo dia. Elas entram na lista de hoje e ficam disponíveis no botão “+ Rotina diária”. Dá para mudar depois na aba Modelos.</p>
+      </div>
+      ${groups.map((g) => `
+        <div class="pickgroup">
+          <h3>${g.label}</h3>
+          ${g.items.map((t) => `
+            <label class="pick" style="--cat:${catVar(t.category)}">
+              <input type="checkbox" name="tpl" value="${t.id}">
+              <span><span class="title">${esc(t.title)}</span>${t.time ? ` <span class="muted">· ${esc(t.time)}</span>` : ''}</span>
+            </label>`).join('')}
+        </div>`).join('')}
+    </section>
+
+    <div class="btnrow onboard-actions">
+      <button class="btn btn-primary" type="submit">Criar perfil e começar</button>
+      <button class="btn btn-ghost" type="button" data-act="import">Já tenho um backup — importar</button>
+    </div>
+  </form>`;
+}
+
+const rolesDatalist = () => '<datalist id="roles"><option>Farmacêutico(a)</option><option>Balconista</option><option>Atendente</option><option>Caixa</option><option>Gerente</option><option>Estoquista</option></datalist>';
 
 function taskHTML(t, { compact = false, showLate = false } = {}) {
   const late = showLate && !t.done && t.date < todayISO();
@@ -306,7 +380,7 @@ function renderDay() {
 
     ${pending.length ? `<ul class="tasklist">${pending.map((t) => taskHTML(t)).join('')}</ul>`
       : `<div class="card empty">${list.length ? 'Tudo feito por aqui! 🎉' : 'Nenhuma tarefa neste dia.'}
-          <div><button class="btn btn-primary" data-act="new">Adicionar tarefa</button></div></div>`}
+          <div class="btnrow" style="justify-content:center"><button class="btn btn-primary" data-act="new">Adicionar tarefa</button><button class="btn" data-act="go-templates">Escolher dos modelos</button></div></div>`}
 
     ${done.length ? `
     <details class="donegroup" ${pending.length ? '' : 'open'}>
@@ -386,15 +460,11 @@ function renderProfile() {
   <div class="grid2">
     <form class="card stack" id="profileForm">
       <h2>Meu perfil</h2>
-      <label>Nome<input name="name" value="${esc(p.name)}" maxlength="100" autocomplete="name"></label>
+      <label>Nome *<input name="name" value="${esc(p.name)}" required maxlength="100" autocomplete="name"></label>
       <label>Função<input name="role" value="${esc(p.role)}" maxlength="100" list="roles" placeholder="Ex.: Balconista, Farmacêutico(a)"></label>
-      <datalist id="roles"><option>Farmacêutico(a)</option><option>Balconista</option><option>Atendente</option><option>Caixa</option><option>Gerente</option><option>Estoquista</option></datalist>
-      <div class="row">
-        <label>Farmácia / unidade<input name="store" value="${esc(p.store)}" maxlength="100"></label>
-        <label>Turno<select name="shift">
-          ${['', 'Manhã', 'Tarde', 'Noite', 'Integral', 'Plantão'].map((s) => `<option ${s === p.shift ? 'selected' : ''} value="${s}">${s || '—'}</option>`).join('')}
-        </select></label>
-      </div>
+      ${rolesDatalist()}
+      <label>Farmácia / unidade<input name="store" value="${esc(p.store)}" maxlength="100"></label>
+      ${shiftFieldsHTML(p)}
       <label>Tema<select name="theme">
         <option value="auto" ${state.settings.theme === 'auto' ? 'selected' : ''}>Automático</option>
         <option value="light" ${state.settings.theme === 'light' ? 'selected' : ''}>Claro</option>
@@ -578,7 +648,8 @@ async function importFile(file) {
   const templates = Array.isArray(data.templates) ? data.templates.map(normalizeTemplate) : [];
   const parts = [hasProfile && 'perfil e modelos', tasks.length && `${tasks.length} tarefa(s)`].filter(Boolean).join(' + ');
 
-  const mode = await ask('Importar dados', `O arquivo contém: ${parts || 'nada para importar'}. Como deseja importar?`, [
+  // No primeiro acesso não há nada para preservar: o backup substitui o estado inicial
+  const mode = !state.onboarded ? 'replace' : await ask('Importar dados', `O arquivo contém: ${parts || 'nada para importar'}. Como deseja importar?`, [
     { label: 'Mesclar', value: 'merge' },
     { label: 'Substituir tudo', value: 'replace', cls: 'btn-danger' },
   ]);
@@ -600,6 +671,7 @@ async function importFile(file) {
     mergeById(state.templates, templates);
     mergeById(state.tasks, tasks);
   }
+  state.onboarded = true;
   save(); applyTheme(); render();
   toast('Dados importados');
 }
@@ -649,6 +721,7 @@ app.addEventListener('click', async (e) => {
     }
     case 'new': openTaskDialog(null, el.dataset.for || ui.date); break;
     case 'routine': applyRoutine(ui.date); break;
+    case 'go-templates': ui.view = 'templates'; render(); window.scrollTo(0, 0); break;
     case 'bring-overdue': moveOverdueToToday(); break;
     case 'new-tpl': openTplDialog(); break;
     case 'tpl-add': addFromTemplate(tplId, ui.date); break;
@@ -691,15 +764,33 @@ app.addEventListener('click', async (e) => {
   }
 });
 
+function finishOnboarding(f) {
+  const name = f.name.value.trim();
+  const shift = readShift(f);
+  if (!name || !shift) return;
+  state.profile = { name, role: f.role.value.trim(), store: f.store.value.trim(), ...shift };
+  const picked = new Set($$('input[name="tpl"]:checked', f).map((c) => c.value));
+  state.templates.forEach((t) => { t.routine = picked.has(t.id); });
+  const today = todayISO();
+  state.tasks = state.templates.filter((t) => t.routine).map((t) => taskFromTemplate(t, today));
+  state.onboarded = true;
+  ui.view = 'day'; ui.date = today;
+  save(); render(); window.scrollTo(0, 0);
+  toast(picked.size ? `Perfil criado · ${picked.size} tarefa(s) na rotina de hoje` : 'Perfil criado! Adicione suas tarefas no +');
+}
+
 app.addEventListener('change', (e) => {
   if (e.target.id === 'jumpDate' && isValidISO(e.target.value)) { ui.date = e.target.value; render(); }
 });
 
 app.addEventListener('submit', (e) => {
+  if (e.target.id === 'onboardForm') { e.preventDefault(); finishOnboarding(e.target); return; }
   if (e.target.id !== 'profileForm') return;
   e.preventDefault();
   const f = e.target;
-  state.profile = { name: f.name.value.trim(), role: f.role.value.trim(), store: f.store.value.trim(), shift: f.shift.value };
+  const shift = readShift(f);
+  if (!shift) return;
+  state.profile = { name: f.name.value.trim(), role: f.role.value.trim(), store: f.store.value.trim(), ...shift };
   state.settings.theme = f.theme.value;
   save(); applyTheme(); render();
   toast('Perfil salvo');

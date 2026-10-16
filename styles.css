@@ -46,6 +46,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -265,3 +266,23 @@ dialog p { margin: 0; }
 
 #installBtn { white-space: nowrap; flex: none; }
 @media (max-width: 899px) { main { padding-bottom: 88px; } }
+
+/* Primeiro acesso (criação de perfil) */
+body.onboarding { padding-bottom: 32px; }
+body.onboarding main { padding-bottom: 16px; }
+.onboard { max-width: 680px; margin: 0 auto; }
+.onboard h1 { font-size: 1.5rem; }
+.onboard > div > p { margin: 6px 0 0; }
+fieldset.shift { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset.shift legend { padding: 0; margin-bottom: 4px; font-size: .85rem; font-weight: 600; color: var(--text); }
+.pickgroup { display: flex; flex-direction: column; gap: 6px; }
+.pickgroup h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 4px; }
+.pick {
+  flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--border); border-left: 4px solid var(--cat); border-radius: 10px;
+  color: var(--text); font-weight: 400; font-size: .92rem;
+}
+.pick:has(input:checked) { background: var(--primary-soft); border-color: var(--primary); border-left-color: var(--cat); }
+.pick input { width: 20px; height: 20px; flex: none; accent-color: var(--primary); }
+.onboard-actions { position: sticky; bottom: 0; padding: 12px 0 calc(12px + env(safe-area-inset-bottom)); background: var(--bg); }
+@media (max-width: 520px) { .onboard-actions .btn { flex: 1 1 100%; } }

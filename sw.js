@@ -1,5 +1,5 @@
 // Cache do app para funcionar offline. Aumente a versão ao alterar arquivos.
-const CACHE = 'farmatarefas-v1';
+const CACHE = 'farmatarefas-v2';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
