@@ -1,7 +1,8 @@
 # FarmaTarefas
 
 To-do list para trabalhadores de farmácia. Web responsivo + PWA (instalável, funciona offline).
-n**Online:** https://robsonbaioco.github.io/farmacia-tarefas/
+
+**Online:** https://robsonbaioco.github.io/farmacia-tarefas/
 
 ## Rodar
 
