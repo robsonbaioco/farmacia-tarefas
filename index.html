@@ -44,7 +44,11 @@
       <label>Observações<textarea name="notes" rows="2" maxlength="500" placeholder="Opcional"></textarea></label>
       <div class="row">
         <label>Dia<input type="date" name="date" required></label>
-        <label>Horário<input type="time" name="time"></label>
+        <label>Momento do turno<select name="moment">
+          <option value="inicio">Início do turno</option>
+          <option value="" selected>Durante o turno</option>
+          <option value="fim">Fim do turno</option>
+        </select></label>
       </div>
       <div class="row">
         <label>Categoria<select name="category"></select></label>
@@ -86,7 +90,11 @@
       <label>Tarefa<input name="title" required maxlength="120"></label>
       <label>Observações<textarea name="notes" rows="2" maxlength="500"></textarea></label>
       <div class="row">
-        <label>Horário sugerido<input type="time" name="time"></label>
+        <label>Momento do turno<select name="moment">
+          <option value="inicio">Início do turno</option>
+          <option value="" selected>Durante o turno</option>
+          <option value="fim">Fim do turno</option>
+        </select></label>
         <label>Categoria<select name="category"></select></label>
       </div>
       <div class="row">

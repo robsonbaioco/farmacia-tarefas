@@ -19,14 +19,23 @@ const CATEGORIES = [
   { id: 'outros', label: 'Outros' },
 ];
 
+// Momento do turno no lugar de horário fixo: vale para qualquer turno (manhã, tarde, noite)
+const MOMENTS = [
+  { id: 'inicio', label: 'Início do turno', short: 'Início' },
+  { id: '', label: 'Durante o turno', short: '' },
+  { id: 'fim', label: 'Fim do turno', short: 'Fim' },
+];
+const MOMENT_ORDER = { inicio: 0, '': 1, fim: 2 };
+const momentInfo = (id) => MOMENTS.find((m) => m.id === id) || MOMENTS[1];
+
 const DEFAULT_TEMPLATES = [
-  { title: 'Registrar temperatura e umidade (abertura)', category: 'estoque', time: '08:00', priority: 'alta', notes: 'Geladeira de termolábeis (2 °C a 8 °C) e ambiente.' },
-  { title: 'Abrir caixa e conferir troco', category: 'caixa', time: '08:00', priority: 'normal' },
-  { title: 'Conferir receitas retidas e escriturar no SNGPC', category: 'controlados', time: '10:00', priority: 'alta' },
-  { title: 'Repor gôndolas e expositores', category: 'estoque', time: '11:00', priority: 'normal' },
-  { title: 'Limpeza e organização do balcão', category: 'limpeza', time: '13:00', priority: 'normal' },
-  { title: 'Registrar temperatura e umidade (fechamento)', category: 'estoque', time: '17:00', priority: 'alta' },
-  { title: 'Fechamento e conferência do caixa', category: 'caixa', time: '18:00', priority: 'normal' },
+  { title: 'Registrar temperatura e umidade (abertura)', category: 'estoque', moment: 'inicio', priority: 'alta', notes: 'Geladeira de termolábeis (2 °C a 8 °C) e ambiente.' },
+  { title: 'Abrir caixa e conferir troco', category: 'caixa', moment: 'inicio', priority: 'normal' },
+  { title: 'Conferir receitas retidas e escriturar no SNGPC', category: 'controlados', priority: 'alta' },
+  { title: 'Repor gôndolas e expositores', category: 'estoque', priority: 'normal' },
+  { title: 'Limpeza e organização do balcão', category: 'limpeza', priority: 'normal' },
+  { title: 'Registrar temperatura e umidade (fechamento)', category: 'estoque', moment: 'fim', priority: 'alta' },
+  { title: 'Fechamento e conferência do caixa', category: 'caixa', moment: 'fim', priority: 'normal' },
   { title: 'Verificar produtos próximos ao vencimento', category: 'estoque', priority: 'normal', notes: 'Separar itens que vencem nos próximos 90 dias.' },
   { title: 'Receber e conferir mercadoria (nota x pedido)', category: 'estoque', priority: 'normal' },
   { title: 'Inventário de medicamentos controlados', category: 'controlados', priority: 'alta' },
@@ -37,6 +46,9 @@ const DEFAULT_TEMPLATES = [
   { title: 'Limpeza da geladeira de termolábeis', category: 'limpeza', priority: 'normal' },
   { title: 'Descarte de vencidos / avariados (PGRSS)', category: 'administrativo', priority: 'normal' },
 ];
+
+// Dados de versões antigas tinham hora fixa nos modelos padrão; o título diz qual momento ela representava
+const DEFAULT_MOMENT_BY_TITLE = new Map(DEFAULT_TEMPLATES.map((t) => [t.title.toLowerCase(), t.moment || '']));
 
 /* ---------------- Utilidades ---------------- */
 
@@ -102,12 +114,20 @@ function save() {
 }
 
 function normalizeTask(t) {
+  let moment = MOMENT_ORDER[t.moment] != null ? t.moment : '';
+  let time = /^\d{2}:\d{2}$/.test(t.time || '') ? t.time : '';
+  // Tarefa antiga com hora herdada de modelo padrão: vira momento do turno
+  if (t.moment == null && time) {
+    const m = DEFAULT_MOMENT_BY_TITLE.get(String(t.title || '').toLowerCase());
+    if (m != null) { moment = m; time = ''; }
+  }
   return {
     id: String(t.id || uid()),
     title: String(t.title || '').slice(0, 120) || 'Sem título',
     notes: String(t.notes || '').slice(0, 500),
     date: isValidISO(t.date) ? t.date : todayISO(),
-    time: /^\d{2}:\d{2}$/.test(t.time || '') ? t.time : '',
+    time,
+    moment,
     category: CATEGORIES.some((c) => c.id === t.category) ? t.category : 'outros',
     priority: ['baixa', 'normal', 'alta'].includes(t.priority) ? t.priority : 'normal',
     done: !!t.done,
@@ -117,11 +137,14 @@ function normalizeTask(t) {
 }
 
 function normalizeTemplate(t) {
+  let moment = MOMENT_ORDER[t.moment] != null ? t.moment : '';
+  // Modelo antigo com hora fixa: os padrão viram o momento equivalente; os demais, "durante o turno"
+  if (t.moment == null && t.time) moment = DEFAULT_MOMENT_BY_TITLE.get(String(t.title || '').toLowerCase()) ?? '';
   return {
     id: String(t.id || uid()),
     title: String(t.title || '').slice(0, 120) || 'Sem título',
     notes: String(t.notes || '').slice(0, 500),
-    time: /^\d{2}:\d{2}$/.test(t.time || '') ? t.time : '',
+    moment,
     category: CATEGORIES.some((c) => c.id === t.category) ? t.category : 'outros',
     priority: ['baixa', 'normal', 'alta'].includes(t.priority) ? t.priority : 'normal',
     routine: !!t.routine,
@@ -151,11 +174,12 @@ function pickStrings(obj, keys) {
 }
 
 function taskFromTemplate(t, date) {
-  return normalizeTask({ title: t.title, notes: t.notes, time: t.time, category: t.category, priority: t.priority, date });
+  return normalizeTask({ title: t.title, notes: t.notes, moment: t.moment, category: t.category, priority: t.priority, date });
 }
 
 const sortTasks = (a, b) =>
   (a.done - b.done) ||
+  (MOMENT_ORDER[a.moment] - MOMENT_ORDER[b.moment]) ||
   ((a.time || '99') < (b.time || '99') ? -1 : (a.time || '99') > (b.time || '99') ? 1 : 0) ||
   (({ alta: 0, normal: 1, baixa: 2 })[a.priority] - ({ alta: 0, normal: 1, baixa: 2 })[b.priority]) ||
   a.createdAt.localeCompare(b.createdAt);
@@ -292,7 +316,7 @@ function renderOnboarding() {
           ${g.items.map((t) => `
             <label class="pick" style="--cat:${catVar(t.category)}">
               <input type="checkbox" name="tpl" value="${t.id}">
-              <span><span class="title">${esc(t.title)}</span>${t.time ? ` <span class="muted">· ${esc(t.time)}</span>` : ''}</span>
+              <span><span class="title">${esc(t.title)}</span>${t.moment ? ` <span class="muted">· ${momentInfo(t.moment).label.toLowerCase()}</span>` : ''}</span>
             </label>`).join('')}
         </div>`).join('')}
     </section>
@@ -315,6 +339,7 @@ function taskHTML(t, { compact = false, showLate = false } = {}) {
       <div class="title">${esc(t.title)}</div>
       ${!compact && t.notes ? `<div class="notes">${esc(t.notes)}</div>` : ''}
       <div class="meta">
+        ${t.moment ? `<span class="pill">${compact ? momentInfo(t.moment).short : momentInfo(t.moment).label}</span>` : ''}
         ${t.time ? `<span class="pill">${esc(t.time)}</span>` : ''}
         ${compact ? '' : `<span class="pill cat">${catLabel(t.category)}</span>`}
         ${t.priority === 'alta' ? '<span class="pill alta">Alta</span>' : ''}
@@ -437,7 +462,7 @@ function renderTemplates() {
             <div class="title">${esc(t.title)}</div>
             ${t.notes ? `<div class="notes muted" style="font-size:.85rem">${esc(t.notes)}</div>` : ''}
             <div class="meta">
-              ${t.time ? `<span class="pill">${esc(t.time)}</span>` : ''}
+              ${t.moment ? `<span class="pill">${momentInfo(t.moment).label}</span>` : ''}
               ${t.routine ? '<span class="pill cat">Rotina diária</span>' : ''}
               ${t.priority === 'alta' ? '<span class="pill alta">Alta</span>' : ''}
             </div>
@@ -527,7 +552,7 @@ function openTaskDialog(id = null, date = ui.date) {
   f.title.value = t?.title || '';
   f.notes.value = t?.notes || '';
   f.date.value = t?.date || date;
-  f.time.value = t?.time || '';
+  f.moment.value = t?.moment || '';
   f.category.value = t?.category || 'outros';
   f.priority.value = t?.priority || 'normal';
   f.saveAsTemplate.checked = false;
@@ -539,7 +564,7 @@ function openTaskDialog(id = null, date = ui.date) {
 
 $('#taskForm').addEventListener('submit', (e) => {
   const f = e.target;
-  const data = { title: f.title.value.trim(), notes: f.notes.value.trim(), date: f.date.value, time: f.time.value, category: f.category.value, priority: f.priority.value };
+  const data = { title: f.title.value.trim(), notes: f.notes.value.trim(), date: f.date.value, moment: f.moment.value, category: f.category.value, priority: f.priority.value };
   if (!data.title || !isValidISO(data.date)) { e.preventDefault(); return; }
   if (ui.editingTaskId) {
     const t = state.tasks.find((x) => x.id === ui.editingTaskId);
@@ -587,7 +612,7 @@ function openTplDialog(id = null) {
   $('#tplDialogTitle').textContent = t ? 'Editar modelo' : 'Novo modelo';
   f.title.value = t?.title || '';
   f.notes.value = t?.notes || '';
-  f.time.value = t?.time || '';
+  f.moment.value = t?.moment || '';
   f.category.value = t?.category || 'outros';
   f.priority.value = t?.priority || 'normal';
   f.routine.checked = !!t?.routine;
@@ -596,7 +621,7 @@ function openTplDialog(id = null) {
 
 $('#tplForm').addEventListener('submit', (e) => {
   const f = e.target;
-  const data = { title: f.title.value.trim(), notes: f.notes.value.trim(), time: f.time.value, category: f.category.value, priority: f.priority.value, routine: f.routine.checked };
+  const data = { title: f.title.value.trim(), notes: f.notes.value.trim(), moment: f.moment.value, category: f.category.value, priority: f.priority.value, routine: f.routine.checked };
   if (!data.title) { e.preventDefault(); return; }
   if (ui.editingTplId) {
     const t = state.templates.find((x) => x.id === ui.editingTplId);
