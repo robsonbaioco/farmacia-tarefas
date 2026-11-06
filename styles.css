@@ -1,3 +1,10 @@
+/*
+ * Estilos do FarmaTarefas (um arquivo só, sem pré-processador).
+ * :root define os tokens de cor; o tema escuro redefine os mesmos tokens em dois lugares: pelo sistema
+ * (prefers-color-scheme, quando o perfil está em "Automático") e por :root[data-theme="dark"] (escolhido
+ * no perfil; o atributo é posto por applyTheme em app.js). --c-<categoria> é a cor de cada categoria,
+ * lida por catVar() em app.js. Acima de 900px as abas sobem para o topo (layout de computador).
+ */
 :root {
   --bg: #f4f7f6;
   --surface: #ffffff;
@@ -45,6 +52,7 @@
   color-scheme: dark;
 }
 
+/* Base */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }

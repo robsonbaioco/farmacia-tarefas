@@ -3,12 +3,21 @@
 /* ============================================================
  * FarmaTarefas — to-do list para trabalhadores de farmácia
  * Dados ficam no localStorage do navegador; backup via JSON.
+ *
+ * Todo o app está neste arquivo: estado e persistência, regras das
+ * tarefas e modelos, as quatro telas (Dia, Semana, Modelos, Perfil)
+ * desenhadas como texto HTML dentro de <main id="app">, os diálogos
+ * que já existem no index.html, importar/exportar e o registro do
+ * service worker (sw.js). Os estilos estão em styles.css.
  * ============================================================ */
 
+/** Chave única do localStorage onde fica todo o estado (perfil, tarefas, modelos, tema). */
 const STORAGE_KEY = 'farmatarefas:v1';
+/** Marca e versão gravadas no JSON de backup; a importação recusa arquivos sem essa marca. */
 const EXPORT_FORMAT = 'farmatarefas-backup';
 const EXPORT_VERSION = 1;
 
+/** Categorias das tarefas. O id também nomeia a cor no CSS (--c-<id>); a última ("outros") é a reserva. */
 const CATEGORIES = [
   { id: 'atendimento', label: 'Atendimento' },
   { id: 'estoque', label: 'Estoque' },
@@ -25,9 +34,12 @@ const MOMENTS = [
   { id: '', label: 'Durante o turno', short: '' },
   { id: 'fim', label: 'Fim do turno', short: 'Fim' },
 ];
+/** Ordem dos momentos na lista do dia (início, durante, fim). */
 const MOMENT_ORDER = { inicio: 0, '': 1, fim: 2 };
+/** Dados de um momento pelo id; id desconhecido vira "Durante o turno". */
 const momentInfo = (id) => MOMENTS.find((m) => m.id === id) || MOMENTS[1];
 
+/** Os 16 modelos pré-cadastrados. São só opções: nenhum entra na rotina sem a pessoa marcar. */
 const DEFAULT_TEMPLATES = [
   { title: 'Registrar temperatura e umidade (abertura)', category: 'estoque', moment: 'inicio', priority: 'alta', notes: 'Geladeira de termolábeis (2 °C a 8 °C) e ambiente.' },
   { title: 'Abrir caixa e conferir troco', category: 'caixa', moment: 'inicio', priority: 'normal' },
@@ -52,27 +64,46 @@ const DEFAULT_MOMENT_BY_TITLE = new Map(DEFAULT_TEMPLATES.map((t) => [t.title.to
 
 /* ---------------- Utilidades ---------------- */
 
+/** Atalho para querySelector. */
 const $ = (sel, root = document) => root.querySelector(sel);
+/** Atalho para querySelectorAll, já como array. */
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+/** Id único (randomUUID quando o navegador tem; senão, data + aleatório). */
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+/** Escapa texto para HTML. Todo texto digitado pela pessoa passa por aqui antes de ir para o innerHTML. */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/** Número com dois dígitos ("7" → "07"). */
 const pad = (n) => String(n).padStart(2, '0');
+/** Date → "AAAA-MM-DD" no fuso local (as datas das tarefas são sempre strings nesse formato). */
 const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** "AAAA-MM-DD" → Date à meia-noite local (evita o deslocamento de fuso do new Date("AAAA-MM-DD")). */
 const fromISO = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+/** Data de hoje em "AAAA-MM-DD". */
 const todayISO = () => toISO(new Date());
+/** Soma (ou subtrai) dias a uma data ISO. */
 const addDays = (iso, n) => { const d = fromISO(iso); d.setDate(d.getDate() + n); return toISO(d); };
+/** Confere se é um horário "HH:MM" válido (00:00 a 23:59). */
 const isValidTime = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(s || '');
+/** Turno do perfil como "08:00–18:00", ou vazio se não preenchido. */
 const shiftLabel = (p) => (p.shiftStart && p.shiftEnd ? `${p.shiftStart}–${p.shiftEnd}` : '');
+/** Confere se é uma data "AAAA-MM-DD" válida. */
 const isValidISO = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(fromISO(s).getTime());
 // Semana começa na segunda-feira
+/** Segunda-feira da semana de uma data. */
 const weekStart = (iso) => { const d = fromISO(iso); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return toISO(d); };
+/** Os sete dias (segunda a domingo) da semana de uma data. */
 const weekDays = (iso) => { const s = weekStart(iso); return Array.from({ length: 7 }, (_, i) => addDays(s, i)); };
 
+/** Primeira letra maiúscula. */
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+/** Data por extenso: "Segunda-feira, 6 de novembro". */
 const fmtLong = (iso) => cap(fromISO(iso).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
+/** Data curta: "06/11". */
 const fmtShort = (iso) => fromISO(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+/** Dia da semana abreviado, sem o ponto: "seg". */
 const fmtWeekday = (iso) => fromISO(iso).toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+/** Data relativa a hoje: "Hoje", "Amanhã", "Ontem", "Daqui a 3 dias", "Há 2 dias". */
 const relativeLabel = (iso) => {
   const diff = Math.round((fromISO(iso) - fromISO(todayISO())) / 864e5);
   if (diff === 0) return 'Hoje';
@@ -80,14 +111,18 @@ const relativeLabel = (iso) => {
   if (diff === -1) return 'Ontem';
   return diff > 0 ? `Daqui a ${diff} dias` : `Há ${-diff} dias`;
 };
+/** Nome de uma categoria pelo id ("Outros" se não existir). */
 const catLabel = (id) => (CATEGORIES.find((c) => c.id === id) || CATEGORIES.at(-1)).label;
+/** Cor CSS de uma categoria, como var(--c-<id>). */
 const catVar = (id) => `var(--c-${CATEGORIES.some((c) => c.id === id) ? id : 'outros'})`;
 
 /* ---------------- Estado ---------------- */
 
+// state: tudo o que é salvo. ui: só a tela atual (aba, dia escolhido e o que está sendo editado), não é salvo.
 let state = load();
 const ui = { view: 'day', date: todayISO(), editingTaskId: null, editingTplId: null, movingTaskId: null };
 
+/** Estado inicial de quem nunca usou: perfil vazio, sem tarefas, os 16 modelos padrão e o cadastro por abrir. */
 function freshState() {
   return {
     profile: { name: '', role: '', store: '', shiftStart: '', shiftEnd: '' },
@@ -100,6 +135,7 @@ function freshState() {
   };
 }
 
+/** Lê o estado do localStorage e o saneia; sem dados (ou com dados ilegíveis), devolve o estado inicial. */
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -108,11 +144,17 @@ function load() {
   return freshState();
 }
 
+/** Grava o estado inteiro no localStorage; avisa se o navegador recusar (cheio ou bloqueado). */
 function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   catch (e) { toast('Não foi possível salvar (armazenamento cheio ou bloqueado).'); }
 }
 
+/**
+ * Tarefa em formato garantido: preenche o que falta, corta textos longos, valida categoria, prioridade e data.
+ * Usada ao ler dados salvos, ao importar backup e ao salvar o formulário. Também converte dados antigos
+ * (com hora fixa) para o momento do turno.
+ */
 function normalizeTask(t) {
   let moment = MOMENT_ORDER[t.moment] != null ? t.moment : '';
   let time = /^\d{2}:\d{2}$/.test(t.time || '') ? t.time : '';
@@ -136,6 +178,7 @@ function normalizeTask(t) {
   };
 }
 
+/** Modelo em formato garantido (mesmas regras da tarefa, sem data e com a marca de rotina diária). */
 function normalizeTemplate(t) {
   let moment = MOMENT_ORDER[t.moment] != null ? t.moment : '';
   // Modelo antigo com hora fixa: os padrão viram o momento equivalente; os demais, "durante o turno"
@@ -151,6 +194,7 @@ function normalizeTemplate(t) {
   };
 }
 
+/** Estado completo validado a partir de qualquer objeto (dados salvos ou backup); campos inválidos voltam ao padrão. */
 function sanitizeState(s) {
   const base = freshState();
   const profile = { ...base.profile, ...pickStrings(s.profile, ['name', 'role', 'store', 'shiftStart', 'shiftEnd']) };
@@ -167,16 +211,19 @@ function sanitizeState(s) {
   };
 }
 
+/** Copia de um objeto só as chaves pedidas, como texto de até 100 caracteres. */
 function pickStrings(obj, keys) {
   const out = {};
   if (obj && typeof obj === 'object') for (const k of keys) if (obj[k] != null) out[k] = String(obj[k]).slice(0, 100);
   return out;
 }
 
+/** Tarefa nova num dia a partir de um modelo. */
 function taskFromTemplate(t, date) {
   return normalizeTask({ title: t.title, notes: t.notes, moment: t.moment, category: t.category, priority: t.priority, date });
 }
 
+/** Ordem da lista: pendentes antes das concluídas, depois momento do turno, hora (dados antigos), prioridade e criação. */
 const sortTasks = (a, b) =>
   (a.done - b.done) ||
   (MOMENT_ORDER[a.moment] - MOMENT_ORDER[b.moment]) ||
@@ -184,11 +231,14 @@ const sortTasks = (a, b) =>
   (({ alta: 0, normal: 1, baixa: 2 })[a.priority] - ({ alta: 0, normal: 1, baixa: 2 })[b.priority]) ||
   a.createdAt.localeCompare(b.createdAt);
 
+/** Tarefas de um dia, já ordenadas. */
 const tasksOn = (iso) => state.tasks.filter((t) => t.date === iso).sort(sortTasks);
+/** Tarefas pendentes de dias anteriores a hoje, da mais antiga para a mais nova. */
 const overdueTasks = () => state.tasks.filter((t) => !t.done && t.date < todayISO()).sort((a, b) => a.date.localeCompare(b.date));
 
 /* ---------------- Ações ---------------- */
 
+/** Marca/desmarca uma tarefa como concluída. */
 function toggleTask(id) {
   const t = state.tasks.find((x) => x.id === id);
   if (!t) return;
@@ -197,6 +247,7 @@ function toggleTask(id) {
   save(); render();
 }
 
+/** Muda a tarefa de dia, com "Desfazer" no aviso. */
 function moveTask(id, date) {
   const t = state.tasks.find((x) => x.id === id);
   if (!t || !isValidISO(date) || t.date === date) return;
@@ -206,6 +257,7 @@ function moveTask(id, date) {
   toast(`Movida para ${relativeLabel(date).toLowerCase()} (${fmtShort(date)})`, () => { t.date = from; save(); render(); });
 }
 
+/** Exclui a tarefa, com "Desfazer" no aviso (a tarefa volta ao fim da lista). */
 function deleteTask(id) {
   const idx = state.tasks.findIndex((x) => x.id === id);
   if (idx < 0) return;
@@ -214,6 +266,7 @@ function deleteTask(id) {
   toast('Tarefa excluída', () => { state.tasks.push(removed); save(); render(); });
 }
 
+/** Põe no dia os modelos marcados como rotina diária que ainda não estão lá (compara pelo título). */
 function applyRoutine(date) {
   const existing = new Set(tasksOn(date).map((t) => t.title.toLowerCase()));
   const toAdd = state.templates.filter((t) => t.routine && !existing.has(t.title.toLowerCase()));
@@ -226,6 +279,7 @@ function applyRoutine(date) {
   toast(`${added.length} tarefa(s) da rotina adicionada(s)`, () => { state.tasks = state.tasks.filter((t) => !ids.has(t.id)); save(); render(); });
 }
 
+/** Adiciona uma tarefa a partir de um modelo no dia escolhido (pela aba Modelos). */
 function addFromTemplate(tplId, date) {
   const t = state.templates.find((x) => x.id === tplId);
   if (!t) return;
@@ -234,6 +288,7 @@ function addFromTemplate(tplId, date) {
   toast(`“${t.title}” adicionada em ${fmtShort(date)}`);
 }
 
+/** "Trazer para hoje": move todas as pendências atrasadas para hoje, com "Desfazer". */
 function moveOverdueToToday() {
   const list = overdueTasks();
   const prev = list.map((t) => [t, t.date]);
@@ -244,8 +299,10 @@ function moveOverdueToToday() {
 
 /* ---------------- Renderização ---------------- */
 
+/** Área principal; cada tela redesenha o conteúdo dela inteiro. */
 const app = $('#app');
 
+/** Redesenha a tela atual: no primeiro acesso, o cadastro; depois, a aba escolhida (Dia, Semana, Modelos, Perfil). */
 function render() {
   const onboarding = !state.onboarded;
   $('.tabs').hidden = onboarding;
@@ -257,6 +314,7 @@ function render() {
   ({ day: renderDay, week: renderWeek, templates: renderTemplates, profile: renderProfile })[ui.view]();
 }
 
+/** Saudação do topo conforme a hora, com primeiro nome, unidade e turno. */
 function renderGreeting() {
   const h = new Date().getHours();
   const hi = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
@@ -266,6 +324,7 @@ function renderGreeting() {
   $('#greeting').textContent = `${hi}${name ? ', ' + name : ''}${store ? ' · ' + store : ''}${shift ? ' · ' + shift : ''}`;
 }
 
+/** Campos de início e fim do turno (usados no cadastro e no perfil). */
 function shiftFieldsHTML(p) {
   return `
   <fieldset class="shift">
@@ -285,6 +344,7 @@ function readShift(f) {
   return { shiftStart, shiftEnd };
 }
 
+/** Primeiro acesso: formulário de perfil + escolha dos modelos que entram na rotina diária (agrupados por categoria). */
 function renderOnboarding() {
   const groups = CATEGORIES.map((c) => ({ ...c, items: state.templates.filter((t) => t.category === c.id) })).filter((g) => g.items.length);
   app.innerHTML = `
@@ -328,8 +388,13 @@ function renderOnboarding() {
   </form>`;
 }
 
+/** Sugestões de função para o campo "Função". */
 const rolesDatalist = () => '<datalist id="roles"><option>Farmacêutico(a)</option><option>Balconista</option><option>Atendente</option><option>Caixa</option><option>Gerente</option><option>Estoquista</option></datalist>';
 
+/**
+ * HTML de uma tarefa da lista. `compact` é a versão curta da tela Semana (sem observações nem categoria);
+ * `showLate` mostra a data original em pendências atrasadas.
+ */
 function taskHTML(t, { compact = false, showLate = false } = {}) {
   const late = showLate && !t.done && t.date < todayISO();
   return `
@@ -353,6 +418,7 @@ function taskHTML(t, { compact = false, showLate = false } = {}) {
   </li>`;
 }
 
+/** Tela Dia: navegação entre dias, faixa da semana, pendências atrasadas, progresso, pendentes e concluídas. */
 function renderDay() {
   const d = ui.date;
   const list = tasksOn(d);
@@ -416,6 +482,7 @@ function renderDay() {
   </div>`;
 }
 
+/** Tela Semana: uma coluna por dia (segunda a domingo), onde as tarefas podem ser arrastadas entre os dias. */
 function renderWeek() {
   const days = weekDays(ui.date);
   const today = todayISO();
@@ -441,6 +508,7 @@ function renderWeek() {
   </div>`;
 }
 
+/** Tela Modelos: modelos por categoria, com adicionar ao dia, editar, excluir e restaurar os padrão. */
 function renderTemplates() {
   const groups = CATEGORIES.map((c) => ({ ...c, items: state.templates.filter((t) => t.category === c.id) })).filter((g) => g.items.length);
   app.innerHTML = `
@@ -477,6 +545,7 @@ function renderTemplates() {
   </div>`;
 }
 
+/** Tela Perfil: dados e tema, resumo, backup (exportar/importar) e limpeza. */
 function renderProfile() {
   const p = state.profile;
   const total = state.tasks.length;
@@ -535,15 +604,18 @@ function renderProfile() {
 
 /* ---------------- Diálogos ---------------- */
 
+/** Preenche um <select> com as categorias. */
 function fillCategorySelect(sel) {
   sel.innerHTML = CATEGORIES.map((c) => `<option value="${c.id}">${c.label}</option>`).join('');
 }
 fillCategorySelect($('#taskForm').category);
 fillCategorySelect($('#tplForm').category);
 
+// Botões "Cancelar" fecham o diálogo; clicar fora da caixa (no fundo) também.
 $$('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 $$('dialog').forEach((d) => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
 
+/** Abre o diálogo de tarefa: vazio para criar (no dia indicado) ou preenchido para editar. */
 function openTaskDialog(id = null, date = ui.date) {
   const f = $('#taskForm');
   const t = id ? state.tasks.find((x) => x.id === id) : null;
@@ -557,11 +629,13 @@ function openTaskDialog(id = null, date = ui.date) {
   f.priority.value = t?.priority || 'normal';
   f.saveAsTemplate.checked = false;
   $('#saveAsTplWrap').hidden = !!t;
+  // Excluir pelo diálogo de edição.
   $('#deleteTaskBtn').hidden = !t;
   $('#taskDialog').showModal();
   if (!t) f.title.focus();
 }
 
+// O form é method="dialog": o envio fecha o diálogo sozinho; preventDefault o mantém aberto se faltar dado.
 $('#taskForm').addEventListener('submit', (e) => {
   const f = e.target;
   const data = { title: f.title.value.trim(), notes: f.notes.value.trim(), date: f.date.value, moment: f.moment.value, category: f.category.value, priority: f.priority.value };
@@ -581,6 +655,7 @@ $('#deleteTaskBtn').addEventListener('click', () => {
   deleteTask(ui.editingTaskId);
 });
 
+/** Abre o diálogo "Mover tarefa" com atalhos (hoje, amanhã, +1 semana...) e um campo de data livre. */
 function openMoveDialog(id) {
   const t = state.tasks.find((x) => x.id === id);
   if (!t) return;
@@ -597,6 +672,7 @@ function openMoveDialog(id) {
   $('#moveDialog').showModal();
 }
 
+// Clique num atalho move na hora; o campo de data move ao enviar o formulário.
 $('#moveChips').addEventListener('click', (e) => {
   const b = e.target.closest('[data-iso]');
   if (!b) return;
@@ -605,6 +681,7 @@ $('#moveChips').addEventListener('click', (e) => {
 });
 $('#moveForm').addEventListener('submit', (e) => moveTask(ui.movingTaskId, e.target.date.value));
 
+/** Abre o diálogo de modelo: vazio para criar ou preenchido para editar. */
 function openTplDialog(id = null) {
   const f = $('#tplForm');
   const t = id ? state.templates.find((x) => x.id === id) : null;
@@ -619,6 +696,7 @@ function openTplDialog(id = null) {
   $('#tplDialog').showModal();
 }
 
+// Salva o modelo novo ou editado.
 $('#tplForm').addEventListener('submit', (e) => {
   const f = e.target;
   const data = { title: f.title.value.trim(), notes: f.notes.value.trim(), moment: f.moment.value, category: f.category.value, priority: f.priority.value, routine: f.routine.checked };
@@ -648,6 +726,10 @@ function ask(title, text, buttons) {
 
 /* ---------------- Importar / exportar ---------------- */
 
+/**
+ * Baixa um JSON de backup. `what`: "all" (tudo), "profile" (perfil, modelos e tema) ou "tasks" (só tarefas).
+ * O nome do arquivo leva o primeiro nome sem acentos e a data.
+ */
 function exportData(what) {
   const payload = { format: EXPORT_FORMAT, version: EXPORT_VERSION, exportedAt: new Date().toISOString(), content: what };
   if (what !== 'tasks') { payload.profile = state.profile; payload.templates = state.templates; payload.settings = state.settings; }
@@ -663,6 +745,10 @@ function exportData(what) {
   toast('Arquivo exportado');
 }
 
+/**
+ * Importa um backup. "Substituir" troca as partes que o arquivo traz; "Mesclar" preenche só os campos vazios
+ * do perfil e junta modelos e tarefas pelo id (o importado vence). No primeiro acesso substitui sem perguntar.
+ */
 async function importFile(file) {
   let data;
   try { data = JSON.parse(await file.text()); }
@@ -702,6 +788,7 @@ async function importFile(file) {
   toast('Dados importados');
 }
 
+/** Junta listas pelo id: item com id já existente é trocado pelo novo; os demais vão para o fim. */
 function mergeById(target, incoming) {
   const idx = new Map(target.map((x, i) => [x.id, i]));
   for (const item of incoming) {
@@ -710,6 +797,7 @@ function mergeById(target, incoming) {
   }
 }
 
+// O input de arquivo escondido é aberto pelos botões "Importar"; o value é zerado para aceitar o mesmo arquivo de novo.
 $('#importFile').addEventListener('change', (e) => {
   const f = e.target.files[0];
   e.target.value = '';
@@ -718,9 +806,12 @@ $('#importFile').addEventListener('change', (e) => {
 
 /* ---------------- Eventos ---------------- */
 
+// Abas e botão flutuante (+): na aba Modelos o + cria modelo; nas outras, tarefa.
 $$('.tab').forEach((b) => b.addEventListener('click', () => { ui.view = b.dataset.view; render(); window.scrollTo(0, 0); }));
 $('#fab').addEventListener('click', () => (ui.view === 'templates' ? openTplDialog() : openTaskDialog()));
 
+// Delegação de cliques de todas as telas: data-nav (andar dias/semanas), data-date (abrir um dia) e
+// data-act (ações). O id da tarefa/modelo vem do elemento pai com data-id/data-tpl.
 app.addEventListener('click', async (e) => {
   const nav = e.target.closest('[data-nav]');
   if (nav) {
@@ -790,6 +881,7 @@ app.addEventListener('click', async (e) => {
   }
 });
 
+/** Conclui o cadastro: salva o perfil, marca os modelos escolhidos como rotina e já cria as tarefas deles hoje. */
 function finishOnboarding(f) {
   const name = f.name.value.trim();
   const shift = readShift(f);
@@ -805,10 +897,12 @@ function finishOnboarding(f) {
   toast(picked.size ? `Perfil criado · ${picked.size} tarefa(s) na rotina de hoje` : 'Perfil criado! Adicione suas tarefas no +');
 }
 
+// Campo de data escondido atrás do ícone de calendário da tela Dia.
 app.addEventListener('change', (e) => {
   if (e.target.id === 'jumpDate' && isValidISO(e.target.value)) { ui.date = e.target.value; render(); }
 });
 
+// Envio do cadastro (primeiro acesso) e do formulário de perfil.
 app.addEventListener('submit', (e) => {
   if (e.target.id === 'onboardForm') { e.preventDefault(); finishOnboarding(e.target); return; }
   if (e.target.id !== 'profileForm') return;
@@ -850,6 +944,7 @@ app.addEventListener('drop', (e) => {
 /* ---------------- Toast ---------------- */
 
 let toastTimer;
+/** Aviso no rodapé. Com `undo`, mostra "Desfazer" e fica 5 s; sem, some em 2,5 s. */
 function toast(msg, undo) {
   const el = $('#toast');
   el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button type="button">Desfazer</button>' : ''}`;
@@ -861,12 +956,14 @@ function toast(msg, undo) {
 
 /* ---------------- Tema, PWA e inicialização ---------------- */
 
+/** Aplica o tema do perfil; "auto" remove o atributo e o CSS segue o tema do sistema. */
 function applyTheme() {
   const t = state.settings.theme;
   if (t === 'auto') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
 }
 
+// Botão "Instalar app": só aparece quando o navegador oferece a instalação (Chrome/Edge/Android).
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; $('#installBtn').hidden = false; });
 $('#installBtn').addEventListener('click', async () => {
@@ -877,6 +974,7 @@ $('#installBtn').addEventListener('click', async () => {
   $('#installBtn').hidden = true;
 });
 
+// Service worker (sw.js) só funciona via http(s), não abrindo o arquivo direto.
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker não registrado', e));
 }
@@ -892,6 +990,7 @@ document.addEventListener('visibilitychange', () => {
 // Sincroniza entre abas abertas
 window.addEventListener('storage', (e) => { if (e.key === STORAGE_KEY) { state = load(); applyTheme(); render(); } });
 
+// Inicialização: grava o estado já saneado (converte dados antigos), aplica o tema e desenha a tela.
 save();
 applyTheme();
 render();

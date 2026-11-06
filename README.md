@@ -23,3 +23,7 @@ Para instalar no celular, o app precisa estar em HTTPS (ex.: GitHub Pages, Netli
 - **Perfil**: nome, função, unidade, turno (início/fim), tema; exportar (tudo / perfil+modelos / atividades) e importar JSON (mesclar ou substituir).
 
 Dados ficam no `localStorage` do navegador. Ao alterar arquivos do app, aumente `CACHE` em `sw.js`.
+
+## Documentação
+
+A documentação para manutenção (arquitetura, dados salvos e backup, service worker, como cada tela funciona, receitas e pontos frágeis) está em [`docs/`](docs/README.md). Cada arquivo de código também explica no topo o seu papel, e cada função tem um comentário dizendo o que faz.

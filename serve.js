@@ -6,12 +6,17 @@ const path = require('path');
 
 const root = __dirname;
 const port = Number(process.argv[2]) || 8080;
+/** Content-Type por extensão (o manifest e o service worker precisam do tipo certo). */
 const types = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json',
   '.svg': 'image/svg+xml', '.png': 'image/png',
 };
 
+/**
+ * Serve os arquivos desta pasta. "/" vira index.html; caminhos que saem da pasta (../) recebem 403.
+ * Cache-Control no-cache para ver as mudanças a cada recarga. Escuta só em 127.0.0.1.
+ */
 http.createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p.endsWith('/')) p += 'index.html';
