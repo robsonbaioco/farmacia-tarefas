@@ -844,7 +844,9 @@ app.addEventListener('click', async (e) => {
     case 'tpl-add': addFromTemplate(tplId, ui.date); break;
     case 'tpl-edit': openTplDialog(tplId); break;
     case 'tpl-del': {
+      // Sem conferir o -1, splice(-1, 1) apagaria o último modelo da lista
       const i = state.templates.findIndex((x) => x.id === tplId);
+      if (i < 0) break;
       const [removed] = state.templates.splice(i, 1);
       save(); render();
       toast('Modelo excluído', () => { state.templates.splice(i, 0, removed); save(); render(); });

@@ -120,7 +120,7 @@ Antes de terminar qualquer mudança: `node --check app.js`, teste em `node serve
 ### Publicar uma mudança
 
 1. Se mudou a lista de arquivos do app (arquivo novo, ícone novo), atualize `ASSETS` em `sw.js`.
-2. Aumente o número em `CACHE` (`farmatarefas-v4` → `v5`) sempre que mudar arquivos do app, como pede o README. Isso descarta a cópia offline antiga.
+2. Aumente o número em `CACHE` (`farmatarefas-v5` → `v6`) sempre que mudar arquivos do app, como pede o README. Isso descarta a cópia offline antiga.
 3. Commit e `git push` para `main`. O GitHub Pages atualiza em um ou dois minutos.
 
 ### Modelo padrão novo
@@ -149,7 +149,6 @@ Não troque a chave `farmatarefas:v1` nem o `EXPORT_FORMAT`: quem já usa perder
 - **HTML como texto**: tudo que vem da pessoa (título, notas, nome, unidade) precisa passar por `esc()` antes de entrar num template string, senão abre brecha para HTML injetado.
 - **Tela inteira redesenhada** a cada ação: foco e posição de rolagem dentro de `#app` se perdem no `render()`. Listeners não podem ser presos a elementos de dentro de `#app` (somem no próximo render); use a delegação existente.
 - **Comparação por título**: "+ Rotina diária" e "Restaurar modelos padrão" decidem o que já existe pelo título em minúsculas. Renomear um modelo de rotina depois de aplicado no dia faz ele ser adicionado de novo; renomear um padrão faz o "Restaurar" trazer o original de volta.
-- **Excluir modelo** usa `findIndex` sem conferir se achou; se o id não existir, `splice(-1, 1)` removeria o último modelo. Hoje o id sempre existe porque vem do próprio elemento desenhado.
 - **Momento do turno** só tem três valores (`MOMENTS` + `MOMENT_ORDER`). Um valor novo precisa entrar nos dois e nos `<select name="moment">` dos dois diálogos do `index.html`.
 - **Dados antigos com hora**: a conversão depende do título do modelo padrão em `DEFAULT_TEMPLATES`. Mudar o título de um padrão faz tarefas antigas com aquela hora deixarem de ser convertidas (continuam funcionando, com a hora exibida).
 - **Cache offline**: esquecer de pôr arquivo novo em `ASSETS` faz ele faltar sem internet.

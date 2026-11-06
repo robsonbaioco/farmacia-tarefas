@@ -1,5 +1,5 @@
 // Cache do app para funcionar offline. Aumente a versão ao alterar arquivos.
-const CACHE = 'farmatarefas-v4';
+const CACHE = 'farmatarefas-v5';
 /** Arquivos guardados na instalação, para o app abrir sem internet. Arquivo novo do app precisa entrar aqui. */
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
